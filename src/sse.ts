@@ -1,25 +1,36 @@
 import { Response } from "express";
 
-const clients = new Set<Response>();
+type Subscriber = {
+  res: Response;
+  orderId: number | null;
+};
+
+const subscribers = new Set<Subscriber>();
 let eventId = 0;
 
-export function subscribe(res: Response) {
+export function subscribe(res: Response, orderId: number | null = null) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
   });
   res.flushHeaders();
-  clients.add(res);
-  console.log(`Abonné connecté, abonnés : ${clients.size}`);
+
+  const subscriber: Subscriber = { res, orderId };
+  subscribers.add(subscriber);
+  console.log(`Abonné connecté, abonnés : ${subscribers.size}`);
 
   res.on("close", () => {
-    clients.delete(res);
-    console.log(`Abonné parti, abonnés : ${clients.size}`);
+    subscribers.delete(subscriber);
+    console.log(`Abonné parti, abonnés : ${subscribers.size}`);
   });
 }
 
-export function broadcast(event: string, data: unknown) {
+export function broadcast(event: string, data: unknown, orderId: number | null = null) {
   const msg = `id: ${++eventId}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const res of clients) res.write(msg);
+  for (const subscriber of subscribers) {
+    if (subscriber.orderId === null || subscriber.orderId === orderId) {
+      subscriber.res.write(msg);
+    }
+  }
 }

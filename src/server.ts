@@ -42,7 +42,7 @@ function scheduleDelivery(orderId: number) {
 
     order.status = "delivered";
     await db.push(`/orders[${orderIndex}]`, order);
-    broadcast("order-status-changed", order);
+    broadcast("order-status-changed", order, order.id);
   }, DELIVERY_DELAY);
 }
 
@@ -55,6 +55,16 @@ async function resumeDeliveries() {
 
 app.get("/stream", (_req, res) => {
   subscribe(res);
+});
+
+app.get("/orders/:id/stream", async (req, res) => {
+  const orders: Order[] = await db.getData("/orders");
+  const order = orders.find((o) => o.id === Number(req.params.id));
+  if (!order) {
+    res.status(404).json({ error: "Commande introuvable" });
+    return;
+  }
+  subscribe(res, order.id);
 });
 
 app.get("/users", async (_req, res) => {
@@ -125,7 +135,7 @@ app.post("/orders", async (req, res) => {
     createdAt: new Date().toISOString(),
   };
   await db.push("/orders[]", order);
-  broadcast("order-created", order);
+  broadcast("order-created", order, order.id);
 
   res.status(201).json(order);
 });
@@ -163,7 +173,7 @@ app.put("/orders/:id", async (req, res) => {
 
   order.status = status;
   await db.push(`/orders[${orderIndex}]`, order);
-  broadcast(status === "cancelled" ? "order-cancelled" : "order-status-changed", order);
+  broadcast(status === "cancelled" ? "order-cancelled" : "order-status-changed", order, order.id);
 
   if (status === "shipped") scheduleDelivery(order.id);
 
