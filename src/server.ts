@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { db } from "./db";
+import { subscribe, broadcast } from "./sse";
 import { User, Product, Order, Status } from "./types";
 
 const app = express();
@@ -29,6 +30,32 @@ function canChangeStatus(from: Status, to: Status): boolean {
   if (to === "cancelled") return from === "preparing";
   return nextStatus[from] === to;
 }
+
+const DELIVERY_DELAY = 20_000;
+
+function scheduleDelivery(orderId: number) {
+  setTimeout(async () => {
+    const orders: Order[] = await db.getData("/orders");
+    const orderIndex = orders.findIndex((o) => o.id === orderId);
+    const order = orders[orderIndex];
+    if (!order || order.status !== "shipped") return;
+
+    order.status = "delivered";
+    await db.push(`/orders[${orderIndex}]`, order);
+    broadcast("order-status-changed", order);
+  }, DELIVERY_DELAY);
+}
+
+async function resumeDeliveries() {
+  const orders: Order[] = await db.getData("/orders");
+  for (const order of orders) {
+    if (order.status === "shipped") scheduleDelivery(order.id);
+  }
+}
+
+app.get("/stream", (_req, res) => {
+  subscribe(res);
+});
 
 app.get("/users", async (_req, res) => {
   const users: User[] = await db.getData("/users");
@@ -86,6 +113,7 @@ app.post("/orders", async (req, res) => {
 
   product.stock -= quantity;
   await db.push(`/products[${productIndex}]`, product);
+  broadcast("stock-changed", product);
 
   const orders: Order[] = await db.getData("/orders");
   const order: Order = {
@@ -97,6 +125,7 @@ app.post("/orders", async (req, res) => {
     createdAt: new Date().toISOString(),
   };
   await db.push("/orders[]", order);
+  broadcast("order-created", order);
 
   res.status(201).json(order);
 });
@@ -128,14 +157,19 @@ app.put("/orders/:id", async (req, res) => {
     if (product) {
       product.stock += order.quantity;
       await db.push(`/products[${productIndex}]`, product);
+      broadcast("stock-changed", product);
     }
   }
 
   order.status = status;
   await db.push(`/orders[${orderIndex}]`, order);
+  broadcast(status === "cancelled" ? "order-cancelled" : "order-status-changed", order);
+
+  if (status === "shipped") scheduleDelivery(order.id);
 
   res.json(order);
 });
 
 const PORT = Number(process.env.PORT) || 3000;
 app.listen(PORT, () => console.log(`http://localhost:${PORT}`));
+resumeDeliveries();
