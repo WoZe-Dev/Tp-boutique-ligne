@@ -1,0 +1,12 @@
+{
+  "users": [
+    { "id": 1, "name": "Ada Lovelace", "username": "ada", "email": "ada@esgi.fr" },
+    { "id": 2, "name": "Alan Turing", "username": "alan", "email": "alan@esgi.fr" }
+  ],
+  "products": [
+    { "id": 1, "name": "Clavier mécanique", "stock": 10 },
+    { "id": 2, "name": "Souris sans fil", "stock": 5 },
+    { "id": 3, "name": "Écran 27 pouces", "stock": 3 }
+  ],
+  "orders": []
+}
