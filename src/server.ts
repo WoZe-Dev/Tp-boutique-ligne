@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { db } from "./db";
-import { User, Product, Order } from "./types";
+import { User, Product, Order, Status } from "./types";
 
 const app = express();
 app.use(cors());
@@ -10,6 +10,24 @@ app.use(express.static("public"));
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+const statuses: Status[] = ["preparing", "shipped", "delivered", "cancelled"];
+
+const nextStatus: Record<Status, Status | null> = {
+  preparing: "shipped",
+  shipped: "delivered",
+  delivered: null,
+  cancelled: null,
+};
+
+function isStatus(value: unknown): value is Status {
+  return statuses.some((s) => s === value);
+}
+
+function canChangeStatus(from: Status, to: Status): boolean {
+  if (to === "cancelled") return from === "preparing";
+  return nextStatus[from] === to;
 }
 
 app.get("/users", async (_req, res) => {
@@ -81,6 +99,42 @@ app.post("/orders", async (req, res) => {
   await db.push("/orders[]", order);
 
   res.status(201).json(order);
+});
+
+app.put("/orders/:id", async (req, res) => {
+  const status: unknown = req.body?.status;
+  if (!isStatus(status)) {
+    res.status(400).json({ error: "status doit valoir shipped, delivered ou cancelled" });
+    return;
+  }
+
+  const orders: Order[] = await db.getData("/orders");
+  const orderIndex = orders.findIndex((o) => o.id === Number(req.params.id));
+  const order = orders[orderIndex];
+  if (!order) {
+    res.status(404).json({ error: "Commande introuvable" });
+    return;
+  }
+
+  if (!canChangeStatus(order.status, status)) {
+    res.status(400).json({ error: `Impossible de passer de ${order.status} à ${status}` });
+    return;
+  }
+
+  if (status === "cancelled") {
+    const products: Product[] = await db.getData("/products");
+    const productIndex = products.findIndex((p) => p.id === order.productId);
+    const product = products[productIndex];
+    if (product) {
+      product.stock += order.quantity;
+      await db.push(`/products[${productIndex}]`, product);
+    }
+  }
+
+  order.status = status;
+  await db.push(`/orders[${orderIndex}]`, order);
+
+  res.json(order);
 });
 
 const PORT = Number(process.env.PORT) || 3000;
